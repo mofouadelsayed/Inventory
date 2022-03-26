@@ -1,0 +1,92 @@
+---
+title: "Import Weekly Inventory"
+author: "MO"
+date: "May 21, 2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(dslabs)
+library(pdftools)
+library(stringr)
+
+list.files("C:/Users/mohamed.elsayad/Documents/My Stuff/General Reports & Documents/Weekly Inventory Reports")
+
+# Then to copy the desired file into my WD
+
+file_path<- ("C:/Users/mohamed.elsayad/Documents/My Stuff/General Reports & Documents/Weekly Inventory Reports/GR Weekly Inventory 29-Dec-21.pdf")
+
+# Warning if report data has already been added
+if (file.copy(file_path, getwd())== FALSE){
+  print("File Already Added")
+} else {
+raw_inventory<- pdf_text("GR Weekly Inventory 29-Dec-21.pdf")
+raw_inventory<- str_split(raw_inventory, "\n")
+
+# Extracting Headers & other info from the report
+report_date<- raw_inventory[[1]]
+report_date<- report_date[1]
+report_date<- str_extract(report_date, "[A-Za-z]{3,9}\\s+\\d+,\\s+\\d+")
+report_title<- raw_inventory[[1]]
+report_title<- report_title[3]
+report_title<- str_trim(report_title)
+header_1<- raw_inventory[[1]]
+header_1<- header_1[6]
+header_1<- str_extract(header_1, c("Product Information", "In Process Inventory"))
+header_2<- raw_inventory[[1]]
+header_2<- header_2[7]
+header_2<- str_extract(header_2, c("Prime", "Fin", "Held", "Met"))
+header_3<- raw_inventory[[1]]
+header_3<- header_3[8]
+header_3<- str_split(header_3, "\\s{2,}+")
+
+# As an Alternative, Renaming the column headers to give more intuitive names
+Header<- c("Size","Length", "Grade", "Total", "Prime Treated", "Prime Untreated", "Fin Treated", "Fin Untreated", "Held Total", "Held Untreated", "Held Treated", "Met Released", "Met Unreleased")
+
+
+# Extract the relevant information from the PDF tables depending on the report size
+
+# Report page 1
+body_1<- raw_inventory[[1]]
+ifelse(length(body_1)== 41, body_1<- body_1[9:35], body_1<- body_1[8:34])
+body_1<- body_1 %>% str_replace_all("(\\d+')\\s*(\\d+)\\s*(\\d/\\d)", "\\1\\2\"\\3")
+body_1<- str_split_fixed(body_1, "\\s{2,}+", n=13)
+colnames(body_1)<- c("Size","Length", "Grade", "Total", "Prime Treated", "Prime Untreated", "Fin Treated", "Fin Untreated", "Held Total", "Held Untreated", "Held Treated", "Met Released", "Met Unreleased")
+body_1<- as_tibble(body_1)
+
+# Report page 2
+body_2<- raw_inventory[[2]]
+ifelse(length(body_2)== 27, body_2<- body_2[9:19], body_2<- body_2[9:18])
+
+body_2<- body_2 %>% str_replace_all("(\\d+')\\s*(\\d+)\\s*(\\d/\\d)", "\\1\\2\"\\3")
+body_2<- str_split_fixed(body_2, "\\s+", n=13)
+colnames(body_2)<- Header
+body_2<- as_tibble(body_2)
+
+# Bind rows & create tibble for imported week
+body<- bind_rows(body_1, body_2)
+body<- mutate_all(body, parse_guess)
+body<- mutate(body, Date=report_date) 
+body<- mutate(body, Date= as.Date(body$Date, format= "%B %d, %Y"))
+body<- mutate(body, Length_Grade= paste(body$Length, body$Grade))
+
+# Discard the last import if it included the "Grand Total" row
+if (any(body$Length== "Grand")== TRUE) {body<- body[-35,]}
+
+# For first import ONLY
+#Extracted_Inventory<- body
+
+# Load the previously extracted data into the environment then append the new data
+Extracted_Inventory<- readRDS("Extracted_Inventory.rds")
+Extracted_Inventory<- bind_rows(Extracted_Inventory, body)
+Extracted_Inventory<- Extracted_Inventory %>% arrange(Date)
+saveRDS(Extracted_Inventory, "Extracted_Inventory.rds")}
+```
+
+```{r}
+Extracted_Inventory %>% filter(Length_Grade %in% c("19'04\" HTUSS", "19'04\" HTR50H", "19'04\" HTR50","17'06\" HTR50", "15'07\"1/4\" HTR50" ), Size== "4") %>% ggplot(aes(Date, `Held Total`, col= Length_Grade)) + geom_line(size= 1) + geom_point(alpha= 0.5)
+
+Extracted_Inventory %>% filter(Length=="19'04\"") %>% ggplot(aes(Date, `Held Total`, col= Grade)) + geom_line() +  theme(axis.text.x = element_text(angle=90, hjust=1))
+```
+
